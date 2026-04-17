@@ -1,4 +1,4 @@
-name: Telegram Proxies
+name: Telegram Proxies Active
 on: 
   workflow_dispatch:
 
@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # Запускаем 20 штук параллельно
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     
     steps:
@@ -17,44 +18,26 @@ jobs:
           chmod +x gost-linux-amd64-2.11.5
           sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
 
-      - name: Start Proxy and SSH Tunnel
+      - name: Start Proxy and Keep Alive
         run: |
-          # Запускаем прокси на 8080 (авто-режим: и HTTP и SOCKS5)
+          # 1. Запускаем прокси-сервер в фоне
           gost -L :8080 > /dev/null 2>&1 &
           
-          # Запускаем SSH туннель через Pinggy (без регистрации)
-          # Мы запрашиваем случайный TCP порт
+          # 2. Запускаем туннель Pinggy в фоне и пишем логи в файл
           ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:8080 tcp@tcp.pinggy.io > tunnel_logs.txt 2>&1 &
           
-          # Даем время на установку соединения
+          # 3. Ждем 10 секунд, чтобы туннель успел подняться
           sleep 10
           
-          # Извлекаем адрес (он выглядит как tcp.pinggy.io:XXXXX)
+          # 4. Достаем адрес прокси из логов
           ADDRESS=$(grep -oE "tcp.pinggy.io:[0-9]+" tunnel_logs.txt | head -n 1)
           
-          echo "Your Proxy: $ADDRESS"
-          echo $ADDRESS > proxy_${{ matrix.id }}.txt
-
-      - name: Upload result
-        uses: actions/upload-artifact@v4
-        with:
-          name: proxy-${{ matrix.id }}
-          path: proxy_${{ matrix.id }}.txt
-
-  show-proxies:
-    needs: spawn-proxy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all
-        uses: actions/download-artifact@v4
-        with:
-          path: results
-          pattern: proxy-*
-          merge-multiple: true
-
-      - name: Final List
-        run: |
-          echo "=== СПИСОК ПРОКСИ ДЛЯ ТЕЛЕГРАМА ==="
-          cat results/*.txt
-          echo "===================================="
-          sleep 3600 # Работает 1 час
+          # 5. ВЫВОДИМ АДРЕС В КОНСОЛЬ (чтобы ты его увидел)
+          echo "****************************************"
+          echo "ТВОЙ ПРОКСИ НОМЕР ${{ matrix.id }}:"
+          echo "$ADDRESS"
+          echo "****************************************"
+          
+          # 6. ГЛАВНОЕ: Не даем машине выключиться 1 час (3600 секунд)
+          # Пока идет этот sleep, прокси будет работать.
+          sleep 3600
