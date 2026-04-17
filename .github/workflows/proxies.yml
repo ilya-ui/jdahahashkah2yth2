@@ -10,8 +10,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ЗАПУСКАЕМ РОВНО 20 МАШИН
-        id:[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # ТУТ БЫЛА ОШИБКА (добавил пробел после id:)
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     steps:
       - name: Checkout Repo
@@ -24,46 +24,30 @@ jobs:
 
       - name: Start Proxy & Push to Repo
         run: |
-          # 1. Запускаем прокси на каждой машине
+          # Запускаем прокси
           gost -L :8080 > /dev/null 2>&1 &
           bore local 8080 --to bore.pub > bore.log 2>&1 &
           
-          # Ждем, пока сервис выдаст порт
-          sleep 10
+          sleep 12
           ADDRESS=$(grep -oE "bore.pub:[0-9]+" bore.log | head -n 1)
           
-          # Настройка бота для записи файла
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Выстраиваем машины в очередь (каждая ждет свою секунду, чтобы не было свалки)
-          sleep $(( ${{ matrix.id }} * 2 ))
+          # Очередь, чтобы не было конфликтов
+          sleep $(( ${{ matrix.id }} * 3 ))
           
-          # 100% рабочий цикл записи в файл без конфликтов
-          for i in {1..20}; do
-            # Берем самую свежую версию репозитория
+          for i in {1..15}; do
             git fetch origin main
             git reset --hard origin/main
             
-            # Дописываем свой прокси в список
             echo "$ADDRESS" >> proxies.txt
-            
-            # Убираем дубликаты (если есть)
             sort -u proxies.txt -o proxies.txt
             
-            # Отправляем в репозиторий
             git add proxies.txt
-            git commit -m "Added proxy from bot ${{ matrix.id }}"
-            
-            # Если пуш прошел успешно - выходим из цикла
-            if git push origin main; then
-              echo "✅ Прокси $ADDRESS успешно записан в файл!"
-              break
-            fi
-            
-            # Если кто-то другой успел запушить раньше - ждем пару секунд и пробуем снова
-            sleep $(( RANDOM % 4 + 1 ))
+            git commit -m "Add proxy ${{ matrix.id }}" && git push origin main && break
+            sleep $(( RANDOM % 5 + 2 ))
           done
 
-      - name: Держим машины онлайн 1 час
+      - name: Keep Alive
         run: sleep 3600
