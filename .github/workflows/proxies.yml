@@ -1,4 +1,4 @@
-name: 20 Bots Proxies
+name: 20 Bots Proxies Fixed
 on: workflow_dispatch
 
 permissions:
@@ -10,22 +10,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ТУТ БЫЛА ОШИБКА (добавил пробел после id:)
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Install Gost & Bore
+      - name: Disable IPv6 and Install Tools
         run: |
+          # ОТКЛЮЧАЕМ IPv6, чтобы не было ошибки ATYP 4
+          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+          
           wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz && gunzip gost-linux-amd64-2.11.5.gz && chmod +x gost-linux-amd64-2.11.5 && sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
           wget -q https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && tar -xf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && chmod +x bore && sudo mv bore /usr/local/bin/bore
 
       - name: Start Proxy & Push to Repo
         run: |
-          # Запускаем прокси
-          gost -L :8080 > /dev/null 2>&1 &
+          # Запускаем прокси с принудительным IPv4
+          gost -L socks5://0.0.0.0:8080?udp=true > /dev/null 2>&1 &
           bore local 8080 --to bore.pub > bore.log 2>&1 &
           
           sleep 12
@@ -34,16 +37,14 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Очередь, чтобы не было конфликтов
+          # Очередь пуша
           sleep $(( ${{ matrix.id }} * 3 ))
           
           for i in {1..15}; do
             git fetch origin main
             git reset --hard origin/main
-            
             echo "$ADDRESS" >> proxies.txt
             sort -u proxies.txt -o proxies.txt
-            
             git add proxies.txt
             git commit -m "Add proxy ${{ matrix.id }}" && git push origin main && break
             sleep $(( RANDOM % 5 + 2 ))
