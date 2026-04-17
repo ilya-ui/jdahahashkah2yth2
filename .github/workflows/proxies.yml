@@ -1,4 +1,4 @@
-name: Telegram Proxies Active
+name: Telegram Proxies Debug
 on: 
   workflow_dispatch:
 
@@ -7,8 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Запускаем 20 штук параллельно
-        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # Для начала попробуй 10 машин (id 1-10), чтобы не забанили. 
+        # Если будет ок - вернешь 20.
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     
     steps:
       - name: Install Gost
@@ -20,24 +21,38 @@ jobs:
 
       - name: Start Proxy and Keep Alive
         run: |
-          # 1. Запускаем прокси-сервер в фоне
-          gost -L :8080 > /dev/null 2>&1 &
+          # 1. Запускаем прокси на порту 8080
+          gost -L socks5://:8080 > /dev/null 2>&1 &
           
-          # 2. Запускаем туннель Pinggy в фоне и пишем логи в файл
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:8080 tcp@tcp.pinggy.io > tunnel_logs.txt 2>&1 &
+          # 2. Запускаем туннель с небольшой задержкой (чтобы не все сразу)
+          sleep $(( (RANDOM % 15) + 1 ))
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R0:localhost:8080 tcp@tcp.pinggy.io > tunnel_logs.txt 2>&1 &
           
-          # 3. Ждем 10 секунд, чтобы туннель успел подняться
-          sleep 10
+          # 3. Ждем появления адреса в логах (максимум 60 секунд)
+          echo "Ожидаю получения адреса прокси..."
+          for i in {1..12}; do
+            ADDRESS=$(grep -oE "tcp.pinggy.io:[0-9]+" tunnel_logs.txt | head -n 1)
+            if [ ! -z "$ADDRESS" ]; then
+              break
+            fi
+            echo "Попытка $i: Адрес еще не получен, жду..."
+            sleep 5
+          done
           
-          # 4. Достаем адрес прокси из логов
-          ADDRESS=$(grep -oE "tcp.pinggy.io:[0-9]+" tunnel_logs.txt | head -n 1)
+          # 4. Выводим результат
+          if [ -z "$ADDRESS" ]; then
+            echo "ОШИБКА: Не удалось получить адрес! Вот логи туннеля:"
+            cat tunnel_logs.txt
+            exit 1
+          else
+            echo "****************************************"
+            echo "ТВОЙ ПРОКСИ ГОТОВ!"
+            echo "Тип: SOCKS5"
+            echo "Адрес: tcp.pinggy.io"
+            echo "Порт: ${ADDRESS#*:}"
+            echo "****************************************"
+            echo "Полная строка: $ADDRESS"
+          fi
           
-          # 5. ВЫВОДИМ АДРЕС В КОНСОЛЬ (чтобы ты его увидел)
-          echo "****************************************"
-          echo "ТВОЙ ПРОКСИ НОМЕР ${{ matrix.id }}:"
-          echo "$ADDRESS"
-          echo "****************************************"
-          
-          # 6. ГЛАВНОЕ: Не даем машине выключиться 1 час (3600 секунд)
-          # Пока идет этот sleep, прокси будет работать.
+          # Не выключаемся 1 час
           sleep 3600
