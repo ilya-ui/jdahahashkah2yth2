@@ -1,0 +1,70 @@
+name: Deploy 20 Proxies
+on: 
+  workflow_dispatch: # Запуск вручную кнопкой
+
+jobs:
+  spawn-proxy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Создаем 20 инстансов
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    
+    steps:
+      - name: Install Gost & Bore
+        run: |
+          # Установка прокси-сервера Gost
+          wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
+          gunzip gost-linux-amd64-2.11.5.gz
+          chmod +x gost-linux-amd64-2.11.5
+          sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
+          
+          # Установка Bore (туннелирование)
+          wget https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz
+          tar -xf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz
+          chmod +x bore
+          sudo mv bore /usr/local/bin/bore
+
+      - name: Start Proxy and Tunnel
+        run: |
+          # Запускаем прокси (SOCKS5 без пароля на 8080)
+          gost -L socks5://:8080 > /dev/null 2>&1 &
+          
+          # Запускаем туннель и сохраняем адрес в файл
+          # Bore выдаст случайный порт на bore.pub
+          bore local 8080 --to bore.pub > tunnel_info.txt 2>&1 &
+          
+          # Даем время на установку соединения
+          sleep 5
+          
+          # Вытаскиваем адрес из лога bore
+          ADDRESS=$(grep -oE "bore.pub:[0-9]+" tunnel_info.txt)
+          echo "Proxy Address: $ADDRESS"
+          echo $ADDRESS > proxy_${{ matrix.id }}.txt
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxy-address-${{ matrix.id }}
+          path: proxy_${{ matrix.id }}.txt
+
+  collect-proxies:
+    needs: spawn-proxy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-proxies
+          pattern: proxy-address-*
+          merge-multiple: true
+
+      - name: Combine and Show
+        run: |
+          cat all-proxies/*.txt > final_proxies.txt
+          echo "=== LIST OF YOUR 20 PROXIES ==="
+          cat final_proxies.txt
+          echo "==============================="
+
+      - name: Keep alive
+        run: sleep 3600 # Держать прокси активными 1 час
