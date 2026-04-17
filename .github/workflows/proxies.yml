@@ -1,64 +1,69 @@
-name: Global Proxy List Robust
-on: 
-  workflow_dispatch:
+name: 20 Bots Proxies
+on: workflow_dispatch
+
+permissions:
+  contents: write
 
 jobs:
-  spawn-proxy:
+  spawn:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-    
-    steps:
-      - name: Install Gost & Bore
-        run: |
-          wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz && gunzip gost-linux-amd64-2.11.5.gz && chmod +x gost-linux-amd64-2.11.5 && sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
-          wget https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && tar -xf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && chmod +x bore && sudo mv bore /usr/local/bin/bore
+        # ЗАПУСКАЕМ РОВНО 20 МАШИН
+        id:[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
-      - name: Start Proxy
-        run: |
-          gost -L :8080 > /dev/null 2>&1 &
-          bore local 8080 --to bore.pub > bore.log 2>&1 &
-          sleep 20
-          ADDRESS=$(grep -oE "bore.pub:[0-9]+" bore.log | head -n 1)
-          echo "$ADDRESS" > proxy_${{ matrix.id }}.txt
-          echo "### Proxy №${{ matrix.id }}: $ADDRESS" >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: proxy-${{ matrix.id }}
-          path: proxy_${{ matrix.id }}.txt
-
-      - name: Keep Alive
-        run: sleep 3600
-
-  collect-and-save:
-    needs: spawn-proxy
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-proxies
-          pattern: proxy-*
-          merge-multiple: true
-
-      - name: Combine Proxies
+      - name: Install Gost & Bore
         run: |
-          cat all-proxies/*.txt | sort -u > proxies.txt
-          echo "Final Proxy List:"
-          cat proxies.txt
+          wget -q https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz && gunzip gost-linux-amd64-2.11.5.gz && chmod +x gost-linux-amd64-2.11.5 && sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
+          wget -q https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && tar -xf bore-v0.5.0-x86_64-unknown-linux-musl.tar.gz && chmod +x bore && sudo mv bore /usr/local/bin/bore
 
-      - name: Commit and Push
+      - name: Start Proxy & Push to Repo
         run: |
+          # 1. Запускаем прокси на каждой машине
+          gost -L :8080 > /dev/null 2>&1 &
+          bore local 8080 --to bore.pub > bore.log 2>&1 &
+          
+          # Ждем, пока сервис выдаст порт
+          sleep 10
+          ADDRESS=$(grep -oE "bore.pub:[0-9]+" bore.log | head -n 1)
+          
+          # Настройка бота для записи файла
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add proxies.txt
-          git commit -m "Update proxies.txt" || echo "No changes"
-          git push origin main
+          
+          # Выстраиваем машины в очередь (каждая ждет свою секунду, чтобы не было свалки)
+          sleep $(( ${{ matrix.id }} * 2 ))
+          
+          # 100% рабочий цикл записи в файл без конфликтов
+          for i in {1..20}; do
+            # Берем самую свежую версию репозитория
+            git fetch origin main
+            git reset --hard origin/main
+            
+            # Дописываем свой прокси в список
+            echo "$ADDRESS" >> proxies.txt
+            
+            # Убираем дубликаты (если есть)
+            sort -u proxies.txt -o proxies.txt
+            
+            # Отправляем в репозиторий
+            git add proxies.txt
+            git commit -m "Added proxy from bot ${{ matrix.id }}"
+            
+            # Если пуш прошел успешно - выходим из цикла
+            if git push origin main; then
+              echo "✅ Прокси $ADDRESS успешно записан в файл!"
+              break
+            fi
+            
+            # Если кто-то другой успел запушить раньше - ждем пару секунд и пробуем снова
+            sleep $(( RANDOM % 4 + 1 ))
+          done
+
+      - name: Держим машины онлайн 1 час
+        run: sleep 3600
